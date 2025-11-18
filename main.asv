@@ -1,0 +1,28 @@
+% main.m
+
+clc; clear; close all;
+
+
+% feature extraction
+fprintf('Step 1: Extracting windowed features for all users...\n');
+feature_extraction;
+fprintf('✅ Feature extraction completed.\n\n');
+
+%% MODEL TRAINING (Day 1)
+fprintf('Step 2: Training neural network using Day-1 data...\n');
+model_training;
+fprintf('✅ Model training completed.\n\n');
+
+%% HYPERPARAMETER OPTIMIZATION  ⚡ (NEW)
+fprintf('Step 2.5: Optimizing neural network hyperparameters...\n');
+model_optimization;     % <-- your new optimization script
+fprintf('✅ Optimization completed.\n\n');
+
+%% MODEL EVALUATION (Day 2)
+fprintf('Step 3: Evaluating on Day-2 data...\n');
+model_evaluation;
+fprintf('✅ Evaluation completed.\n\n');
+
+fprintf('=============================================\n');
+fprintf(' PIPELINE EXECUTION COMPLETE – All steps done.\n');
+fprintf('=============================================\n\n');

@@ -1,0 +1,111 @@
+%%% feature_extraction%%%
+
+
+clearvars; clc;
+
+DATA_DIR = fullfile(pwd,'Data');     % put all CSVs here
+OUT_DIR  = fullfile(pwd,'Features');
+if ~exist(OUT_DIR,'dir'), mkdir(OUT_DIR); end
+
+SAMPLE_RATE = 32;       % Hz
+WINDOW_SECONDS = 4;
+WINDOW_SIZE = WINDOW_SECONDS * SAMPLE_RATE;
+OVERLAP = 0.5;
+WINDOW_STEP = round(WINDOW_SIZE*(1-OVERLAP));
+MOVMEAN_WIN = 5;
+USE_BUTTERWORTH = true;
+BP_LO = 0.5; BP_HI = 12;
+
+files = dir(fullfile(DATA_DIR,'U*NW*.csv'));
+if isempty(files)
+    error('No CSV file.');
+end
+
+fprintf('Found %d data files in %s\n', numel(files), DATA_DIR);
+
+all_feats = []; all_labels = []; all_sessions = [];
+
+for f = 1:numel(files)
+    fname = fullfile(DATA_DIR, files(f).name);
+    fprintf('Processing %s...\n', files(f).name);
+    T = readmatrix(fname);
+    if size(T,2) < 7
+        warning('%s has <7 columns, skipping', files(f).name);
+        continue;
+    end
+    T = T(:,1:7);
+    userID = sscanf(files(f).name,'U%d');
+    if contains(files(f).name,'FD','IgnoreCase',true)
+        session = 1;    % FD = Day1
+    elseif contains(files(f).name, 'MD', 'IgnoreCase',true)
+        session = 2;    % MD = Day2
+    else
+        warning('File %s does not specify FD or MD defaulting to Day 1.', files(f).name);
+        session = 1;
+
+    end
+
+    data = double(T(:,2:7));
+    if size(data,1) < WINDOW_SIZE, continue; end
+
+    %preprocessing%%
+    data = (data - mean(data))./ (std(data)+eps);
+    data = movmean(data, MOVMEAN_WIN, 1);
+    if USE_BUTTERWORTH
+        [b,a] = butter(4,[BP_LO BP_HI]/(SAMPLE_RATE/2),'bandpass');
+        for c = 1:6
+            data(:,c) = filtfilt(b,a,data(:,c));
+        end
+        data = (data - mean(data))./ (std(data)+eps);
+    end
+    acc_mag  = sqrt(sum(data(:,1:3).^2,2));
+    gyro_mag = sqrt(sum(data(:,4:6).^2,2));
+    data = [data acc_mag gyro_mag];
+
+    %features
+    n = size(data,1);
+    feats_user = []; labels_user = [];
+    start = 1;
+    while start + WINDOW_SIZE - 1 <= n
+        win = data(start:start+WINDOW_SIZE-1,:);
+        feats_user = [feats_user; window_features(win,SAMPLE_RATE)]; 
+        labels_user = [labels_user; userID];
+        start = start + WINDOW_STEP;
+    end
+    save(fullfile(OUT_DIR, sprintf('User%d_Day%d_feats.mat',userID,session)), ...
+         'feats_user','labels_user','userID','session');
+
+    all_feats = [all_feats; feats_user]; 
+    all_labels = [all_labels; labels_user]; 
+    all_sessions = [all_sessions; repmat(session,size(feats_user,1),1)]; 
+end
+
+save(fullfile(OUT_DIR,'all_features.mat'),'all_feats','all_labels','all_sessions');
+fprintf('Features saved in %s\n', OUT_DIR);
+
+%window_features
+function feats = window_features(win, fs)
+    feats=[];
+    for c=1:size(win,2)
+        v=win(:,c);
+        fv=[mean(v) std(v) min(v) max(v) median(v) sqrt(mean(v.^2)) sum(v.^2) ...
+            skewness(v) kurtosis(v) iqr(v)];
+        Y=fft(v-mean(v)); N=length(v);
+        P2=abs(Y/N); P1=P2(1:floor(N/2)+1); P1(2:end-1)=2*P1(2:end-1);
+        f=(0:floor(N/2))*(fs/N);
+        [~,idx]=max(P1(2:end)); domf=f(idx+1);
+        psdE=sum(P1.^2);
+        feats=[feats fv domf psdE];
+    end
+    a=win(:,1:3); g=win(:,4:6);
+    feats=[feats corrcoef_extract(a) corrcoef_extract(g)];
+end
+
+function cors=corrcoef_extract(x)
+    if size(x,1)<2, cors=[0 0 0]; return; end
+    c12=corr(x(:,1),x(:,2),'rows','complete');
+    c13=corr(x(:,1),x(:,3),'rows','complete');
+    c23=corr(x(:,2),x(:,3),'rows','complete');
+    cors=[c12 c13 c23];
+    cors(isnan(cors))=0;
+end
